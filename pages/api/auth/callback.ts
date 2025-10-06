@@ -5,35 +5,61 @@ import axios from 'axios';
 import { supabase } from '../../../lib/supabaseClient';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  console.log("--- AUTH CALLBACK RECEIVED (Supabase First Diagnostic) ---");
+  console.log("--- AUTH CALLBACK RECEIVED ---");
 
-  // --- STEP 1: TEST SUPABASE CONNECTION IMMEDIATELY ---
-  try {
-    const testAccountId = 12345; // A fake account ID for testing
-    const testToken = 'test_token';
-    console.log(`Attempting to write a test row to Supabase for account ${testAccountId}...`);
-    
-    const { error: supabaseError } = await supabase
-      .from('accounts')
-      .upsert({ account_id: testAccountId, access_token: testToken }, { onConflict: 'account_id' });
+  const { code } = req.query;
 
-    if (supabaseError) {
-      // If there's a Supabase error, throw it immediately so we can see it.
-      console.error("--- SUPABASE CONNECTION FAILED ---", supabaseError);
-      throw new Error(`Supabase error: ${supabaseError.message}`);
-    }
-    
-    console.log("--- SUPABASE CONNECTION SUCCESSFUL --- Test row written.");
-    // For this test, we will stop here. The goal is just to see if the write works.
-    res.redirect('/success.html');
-    return;
-
-  } catch (error: any) {
-    console.error("--- FATAL ERROR DURING SUPABASE TEST ---");
-    console.error(error.message);
-    res.status(500).send(`A fatal error occurred during the Supabase connection test. Check Vercel logs.`);
-    return;
+  if (!code || typeof code !== 'string') {
+    console.error("Callback requested without a code.");
+    return res.status(400).send("Authorization code is missing.");
   }
   
-  // The rest of the monday.com logic is temporarily disabled for this test.
+  const clientId = process.env.NEXT_PUBLIC_MONDAY_CLIENT_ID;
+  const clientSecret = process.env.MONDAY_CLIENT_SECRET;
+  const host = req.headers.host;
+  const redirectUri = `https://${host}/api/auth/callback`;
+
+  console.log("Preparing to exchange token...");
+  
+  try {
+    const tokenResponse = await axios.post('https://auth.monday.com/oauth2/token', {
+      code: code,
+      client_id: clientId,
+      client_secret: clientSecret,
+      redirect_uri: redirectUri,
+    });
+    
+    const accessToken = tokenResponse.data.access_token;
+    console.log("Successfully exchanged code for access token.");
+    
+    const query = 'query { me { account { id } } }';
+    const accountResponse = await axios.post(
+      'https://api.monday.com/v2',
+      { query },
+      { headers: { Authorization: accessToken, 'Content-Type': 'application/json' } }
+    );
+
+    const accountId = accountResponse.data?.data?.me?.account?.id;
+    if (!accountId) {
+      console.error("API response from 'me' query was missing account ID.", accountResponse.data);
+      throw new Error("Could not retrieve account ID from monday API.");
+    }
+    console.log(`Successfully retrieved accountId: ${accountId}`);
+
+    await supabase
+      .from('accounts')
+      .upsert({ account_id: accountId, access_token: accessToken }, { onConflict: 'account_id' });
+    
+    console.log(`SUCCESS: Credentials for account ${accountId} saved to Supabase.`);
+    res.redirect('/success.html');
+
+  } catch (error: any) {
+    console.error("--- FATAL ERROR DURING AUTHENTICATION ---");
+    if (error.response) {
+      console.error("Monday.com API responded with an error:", JSON.stringify(error.response.data, null, 2));
+    } else {
+      console.error("A non-API error occurred:", error.message);
+    }
+    res.status(500).send(`An error occurred during authentication. Check the Vercel logs for details. Error: ${error.message}`);
+  }
 }
