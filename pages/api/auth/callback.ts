@@ -5,21 +5,26 @@ import axios from 'axios';
 import { supabase } from '../../../lib/supabaseClient';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  console.log("--- AUTH CALLBACK RECEIVED ---");
-
   const { code } = req.query;
 
+  // If there is no code, it might be the start of the flow, or an error.
+  // We will redirect to a success page immediately to get off this URL.
   if (!code || typeof code !== 'string') {
-    console.error("Authorization code is missing.");
-    return res.status(400).send('Authorization code is missing.');
+    res.redirect('/success.html');
+    return;
   }
 
-  const clientId = process.env.NEXT_PUBLIC_MONDAY_CLIENT_ID;
-  const clientSecret = process.env.MONDAY_CLIENT_SECRET;
-  const host = req.headers.host;
-  const redirectUri = `https://${host}/api/auth/callback`;
+  // Immediately redirect the user's browser to the success page.
+  // This gets them off the URL with the sensitive 'code' and prevents refreshes.
+  res.redirect('/success.html');
 
+  // NOW, with the user safely redirected, we do the server-to-server work in the background.
   try {
+    const clientId = process.env.NEXT_PUBLIC_MONDAY_CLIENT_ID;
+    const clientSecret = process.env.MONDAY_CLIENT_SECRET;
+    const host = req.headers.host;
+    const redirectUri = `https://${host}/api/auth/callback`;
+
     const tokenResponse = await axios.post('https://auth.monday.com/oauth2/token', {
       code: code,
       client_id: clientId,
@@ -28,8 +33,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
     
     const accessToken = tokenResponse.data.access_token;
-    console.log("Successfully received access token.");
-
+    
     const query = 'query { me { account { id } } }';
     const accountResponse = await axios.post(
       'https://api.monday.com/v2',
@@ -37,38 +41,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       { headers: { Authorization: accessToken, 'Content-Type': 'application/json' } }
     );
 
-    // --- NEW ROBUST ERROR CHECKING ---
-    // Log the entire response from monday.com for debugging
-    console.log("Monday API 'me' response:", JSON.stringify(accountResponse.data, null, 2));
-
-    if (accountResponse.data.errors) {
-      throw new Error(`Monday API returned errors: ${JSON.stringify(accountResponse.data.errors)}`);
-    }
-
     const accountId = accountResponse.data?.data?.me?.account?.id;
     if (!accountId) {
-      throw new Error('Could not retrieve monday.com account ID from API response.');
+      throw new Error('Could not retrieve account ID from monday API.');
     }
-    console.log(`Successfully retrieved accountId: ${accountId}`);
 
-    const { error } = await supabase
+    await supabase
       .from('accounts')
       .upsert({ account_id: accountId, access_token: accessToken }, { onConflict: 'account_id' });
 
-    if (error) {
-      console.error('Supabase error during upsert:', error);
-      throw error;
-    }
-    console.log(`Successfully saved credentials for accountId: ${accountId} to Supabase.`);
-
-    res.redirect(`https://auth.monday.com/oauth2/authorize/success`);
+    console.log(`SUCCESS: Credentials for account ${accountId} saved.`);
 
   } catch (error: any) {
     if (error.response) {
       console.error('API Error during token exchange:', error.response.data);
     } else {
-      console.error('An error occurred during the OAuth callback:', error.message);
+      console.error('An error occurred during the OAuth callback background process:', error.message);
     }
-    res.status(500).send('An error occurred during authentication.');
   }
 }
