@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Install Data Perfect</title>
+    <style>
+        body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        button { font-size: 1.5rem; padding: 1rem 2rem; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <button onclick="installApp()">Install Data Perfect</button>
+    <script>
+        function installApp() {
+            // This redirects the entire window to our installation endpoint
+            window.top.location.href = '/api/auth/install';
+        }
+    </script>
+</body>
+</html>
