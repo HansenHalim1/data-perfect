@@ -1,0 +1,13 @@
+{
+  "headers": [
+    {
+      "source": "/install.html",
+      "headers": [
+        {
+          "key": "X-Frame-Options",
+          "value": "ALLOW-FROM https://*.monday.com"
+        }
+      ]
+    }
+  ]
+}
