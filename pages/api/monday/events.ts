@@ -25,6 +25,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // }
   
   // Handle the one-time security challenge from monday.com
+  console.log("--- MONDAY.COM WEBHOOK RECEIVED ---");
   if (req.body.challenge) {
     console.log("Received monday.com challenge. Responding.");
     return res.status(200).json({ challenge: req.body.challenge });
